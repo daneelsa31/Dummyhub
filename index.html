@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DummyHub</title>
+
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+
+<body>
+
+    <!-- Main application header -->
+    <header class="app-header">
+        <div class="logo">
+            DummyHub
+        </div>
+
+        <nav class="main-nav">
+            <a href="#/dashboard">Dashboard</a>
+            <a href="#/shop">Shop</a>
+            <a href="#/cart">Cart</a>
+            <a href="#/recipes">Recipes</a>
+            <a href="#/community">Community</a>
+            <a href="#/people">People</a>
+            <a href="#/tasks">Tasks</a>
+        </nav>
+
+        <button id="logout-button" class="hidden">Logout</button>
+
+        <div id="user-info">
+            <a href="#/login" id="login-link" class="hidden">Login</a>
+        </div>
+    </header>
+
+    <!-- Main content area -->
+    <main id="app">
+        <h1>Welcome to DummyHub!</h1>
+        <p>Your application will appear here.</p>
+    </main>
+
+    <script src="js/state.js"></script>
+    <script src="js/utils.js"></script>
+    <script src="js/api.js"></script>
+
+    <script src="js/views/login.js"></script>
+    <script src="js/views/dashboard.js"></script>
+    <script src="js/views/shop.js"></script>
+    <script src="js/views/product-detail.js"></script>
+    <script src="js/views/cart.js"></script>
+    <script src="js/views/recipes.js"></script>
+    <script src="js/views/recipe-detail.js"></script>
+    <script src="js/views/community.js"></script>
+    <script src="js/views/post-detail.js"></script>
+    <script src="js/views/people.js"></script>
+    <script src="js/views/user-profile.js"></script>
+    <script src="js/views/tasks.js"></script>
+    <script src="js/views/not-found.js"></script>
+
+    <script src="js/router.js"></script>
+    <script src="js/main.js"></script>
+
+</body>
+
+</html>
