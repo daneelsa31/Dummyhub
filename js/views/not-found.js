@@ -10,7 +10,7 @@ DummyHub.renderNotFound = function () {
                 doesn't exist.
             </p>
 
-            <a href="#/dashboard">Go to Dashboard</a>
+            <a href="#/">Go to Dashboard</a>
         </section>
     `;
 };

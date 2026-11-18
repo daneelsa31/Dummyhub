@@ -1,48 +1,232 @@
+
+// Load the user's previous purchases
+DummyHub.loadPastCarts = async function () {
+    var userId = DummyHub.state.user.id;
+
+    try {
+        var data = await DummyHub.request("/carts/user/" + userId);
+
+        DummyHub.setState({
+            pastCarts: data.carts
+        });
+
+    } catch (error) {
+        DummyHub.setState({
+            pastCarts: []
+        });
+    }
+
+    DummyHub.refreshCart();
+};
+
+
+// Display the shopping cart
 DummyHub.renderCart = function () {
     var cart = DummyHub.state.cart;
-    var pastCarts = DummyHub.state.pastCarts;
+    var pastCarts = DummyHub.state.pastCarts || [];
 
+    // Calculate the original subtotal
     var subtotal = cart.reduce(function (total, item) {
         return total + (item.price * item.quantity);
     }, 0);
 
+    // Calculate the total discount
     var discount = cart.reduce(function (total, item) {
         var itemSubtotal = item.price * item.quantity;
-        return total + (itemSubtotal * (item.discountPercentage / 100));
+        var percentage = Number(item.discountPercentage) || 0;
+
+        percentage = Math.max(0, Math.min(percentage, 100));
+
+        return total + (itemSubtotal * percentage / 100);
     }, 0);
 
-    var grandTotal = subtotal - discount;
+    // Calculate the final amount
+    var grandTotal = Math.max(0, subtotal - discount);
+
+    var receipt = DummyHub.state.cartReceipt;
 
     return `
         <section class="cart-page">
             <h1>My Shopping Cart</h1>
 
+            ${receipt ? `
+                <div class="checkout-receipt">
+
+                    <div class="receipt-header">
+                        <div class="receipt-success-icon">
+                            &#10003;
+                        </div>
+
+                        <h2>Order Successful!</h2>
+                        <p>Your order has been placed successfully.</p>
+                    </div>
+
+                    <div class="receipt-order-info">
+                        <div class="receipt-info-item">
+                            <span class="receipt-info-label">
+                                Receipt Number
+                            </span>
+
+                            <span class="receipt-info-value">
+                                #${receipt.id}
+                            </span>
+                        </div>
+
+                        <div class="receipt-info-item">
+                            <span class="receipt-info-label">
+                                Order Status
+                            </span>
+
+                            <span class="receipt-info-value">
+                                Successful
+                            </span>
+                        </div>
+
+                        <div class="receipt-info-item">
+                            <span class="receipt-info-label">
+                                Total Products
+                            </span>
+
+                            <span class="receipt-info-value">
+                                ${receipt.totalProducts}
+                            </span>
+                        </div>
+
+                        <div class="receipt-info-item">
+                            <span class="receipt-info-label">
+                                Total Quantity
+                            </span>
+
+                            <span class="receipt-info-value">
+                                ${receipt.totalQuantity} items
+                            </span>
+                        </div>
+                    </div>
+
+                    <div class="receipt-items">
+                        <h3>Order Details</h3>
+
+                        <div class="receipt-table-container">
+                            <table class="receipt-table">
+                                <thead>
+                                    <tr>
+                                        <th>Item</th>
+                                        <th>Qty</th>
+                                        <th>Total</th>
+                                        <th>Discounted</th>
+                                    </tr>
+                                </thead>
+
+                                <tbody>
+                                    ${(receipt.items || []).map(function (item) {
+                                        var itemTotal = item.price * item.quantity;
+
+                                        var percentage =
+                                            Number(item.discountPercentage) || 0;
+
+                                        percentage = Math.max(
+                                            0,
+                                            Math.min(percentage, 100)
+                                        );
+
+                                        var itemDiscount =
+                                            itemTotal * percentage / 100;
+
+                                        var afterDiscount = Math.max(
+                                            0,
+                                            itemTotal - itemDiscount
+                                        );
+
+                                        return `
+                                            <tr>
+                                                <td>
+                                                    ${DummyHub.escapeHTML(item.title)}
+                                                </td>
+
+                                                <td>${item.quantity}</td>
+
+                                                <td>
+                                                    ${DummyHub.formatPrice(itemTotal)}
+                                                </td>
+
+                                                <td>
+                                                    ${DummyHub.formatPrice(afterDiscount)}
+                                                </td>
+                                            </tr>
+                                        `;
+                                    }).join("")}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="receipt-total">
+                        <span>You Pay</span>
+
+                        <strong>
+                            ${DummyHub.formatPrice(receipt.discountedTotal)}
+                        </strong>
+                    </div>
+
+                    <p class="receipt-thank-you">
+                        Thank you for shopping with DummyHub!
+                    </p>
+
+                    <button id="dismiss-receipt">
+                        Done
+                    </button>
+                </div>
+            ` : ""}
+
             ${cart.length === 0
                 ? `
-                    <p>Your shopping cart is currently empty.</p>
-                    <a href="#/shop">Continue Shopping</a>
+                    <div class="empty-cart">
+                        <p>Your shopping cart is currently empty.</p>
+
+                        <a href="#/shop" class="continue-shopping-button">
+                            Continue Shopping
+                        </a>
+                    </div>
                 `
                 : `
                     <div class="cart-items">
                         ${cart.map(function (item) {
                             return `
                                 <div class="cart-item" data-id="${item.id}">
-                                    <h3>${DummyHub.escapeHTML(item.title)}</h3>
 
-                                    <p>Price: $${item.price}</p>
+                                    <div class="cart-item-details">
+                                        <h3>
+                                            ${DummyHub.escapeHTML(item.title)}
+                                        </h3>
 
-                                    <div class="quantity-controls">
-                                        <button data-action="decrease">-</button>
-                                        <span>${item.quantity}</span>
-                                        <button data-action="increase">+</button>
+                                        <p class="cart-item-price">
+                                            ${DummyHub.formatPrice(item.price)} each
+                                        </p>
                                     </div>
 
-                                    <p>
-                                        Subtotal:
-                                        $${(item.price * item.quantity).toFixed(2)}
-                                    </p>
+                                    <div class="cart-item-actions">
+                                        <div class="quantity-controls">
+                                            <button data-action="decrease">-</button>
 
-                                    <button data-action="remove">Remove</button>
+                                            <span>${item.quantity}</span>
+
+                                            <button data-action="increase">+</button>
+                                        </div>
+
+                                        <p class="cart-item-subtotal">
+                                            ${DummyHub.formatPrice(
+                                                item.price * item.quantity
+                                            )}
+                                        </p>
+
+                                        <button
+                                            class="remove-item-button"
+                                            data-action="remove"
+                                        >
+                                            Remove
+                                        </button>
+                                    </div>
+
                                 </div>
                             `;
                         }).join("")}
@@ -50,11 +234,25 @@ DummyHub.renderCart = function () {
 
                     <div class="cart-summary">
                         <h2>Cart Summary</h2>
-                        <p>Subtotal: $${subtotal.toFixed(2)}</p>
-                        <p>Discount: -$${discount.toFixed(2)}</p>
-                        <h3>Grand Total: $${grandTotal.toFixed(2)}</h3>
 
-                        <button id="checkout-button">Checkout</button>
+                        <p>
+                            <span>Subtotal:</span>
+                            <span>${DummyHub.formatPrice(subtotal)}</span>
+                        </p>
+
+                        <p>
+                            <span>Discount:</span>
+                            <span>-${DummyHub.formatPrice(discount)}</span>
+                        </p>
+
+                        <h3>
+                            <span>Grand Total:</span>
+                            <span>${DummyHub.formatPrice(grandTotal)}</span>
+                        </h3>
+
+                        <button id="checkout-button">
+                            Checkout
+                        </button>
                     </div>
                 `
             }
@@ -69,13 +267,25 @@ DummyHub.renderCart = function () {
                             <div class="purchase-card">
                                 <h3>Order #${purchase.id}</h3>
 
-                                <p>Total Products: ${purchase.totalProducts}</p>
+                                <p>
+                                    Total Products:
+                                    ${purchase.totalProducts}
+                                </p>
 
-                                <p>Total Quantity: ${purchase.totalQuantity}</p>
+                                <p>
+                                    Total Quantity:
+                                    ${purchase.totalQuantity}
+                                </p>
 
-                                <p>Original Total: $${purchase.total.toFixed(2)}</p>
+                                <p>
+                                    Original Total:
+                                    ${DummyHub.formatPrice(purchase.total)}
+                                </p>
 
-                                <p>Discounted Total: $${purchase.discountedTotal.toFixed(2)}</p>
+                                <p>
+                                    Discounted Total:
+                                    ${DummyHub.formatPrice(purchase.discountedTotal)}
+                                </p>
                             </div>
                         `;
                     }).join("")
@@ -85,49 +295,100 @@ DummyHub.renderCart = function () {
     `;
 };
 
-DummyHub.setupCartEvents = function () {
-    var cartItems = document.querySelector(".cart-items");
 
-    cartItems.addEventListener("click", function (event) {
-        var button = event.target.closest("[data-action]");
+// Refresh the cart page and header badge
+DummyHub.refreshCart = function () {
+    // Update the badge immediately
+    DummyHub.updateCartBadge();
 
-        if (!button) {
-            return;
-        }
+    // Only redraw the page if the user is viewing the cart
+    if (DummyHub.state.currentRoute !== "cart") {
+        return;
+    }
 
-        var action = button.dataset.action;
+    DummyHub.app.innerHTML = DummyHub.renderCart();
 
-        var cartItem = button.closest(".cart-item");
-        var productId = Number(cartItem.dataset.id);
-
-        if (action === "increase") {
-            DummyHub.updateCartQuantity(productId, 1);
-
-        } else if (action === "decrease") {
-            DummyHub.updateCartQuantity(productId, -1);
-
-        } else if (action === "remove") {
-            DummyHub.removeFromCart(productId);
-        }
-    });
-
-    var checkoutButton = document.getElementById("checkout-button");
-
-    checkoutButton.addEventListener("click", function () {
-        DummyHub.checkout();
-    });
+    DummyHub.setupCartEvents();
 };
 
 
+// Set up cart buttons
+DummyHub.setupCartEvents = function () {
+    var cartItems = document.querySelector(".cart-items");
+
+    // Use one delegated listener for cart item buttons
+    if (cartItems) {
+        cartItems.addEventListener("click", function (event) {
+            var button = event.target.closest("[data-action]");
+
+            if (!button) {
+                return;
+            }
+
+            var cartItem = button.closest(".cart-item");
+
+            if (!cartItem) {
+                return;
+            }
+
+            var productId = Number(cartItem.dataset.id);
+            var action = button.dataset.action;
+
+            if (action === "increase") {
+                DummyHub.updateCartQuantity(productId, 1);
+
+            } else if (action === "decrease") {
+                DummyHub.updateCartQuantity(productId, -1);
+
+            } else if (action === "remove") {
+                DummyHub.removeFromCart(productId);
+            }
+        });
+    }
+
+    // Set up the Checkout button
+    var checkoutButton = document.getElementById("checkout-button");
+
+    if (checkoutButton) {
+        checkoutButton.addEventListener(
+            "click",
+            DummyHub.checkout
+        );
+    }
+
+    // Set up the receipt Dismiss button
+    var dismissButton = document.getElementById("dismiss-receipt");
+
+    if (dismissButton) {
+        dismissButton.addEventListener("click", function () {
+            DummyHub.setState({
+                cartReceipt: null
+            });
+
+            DummyHub.refreshCart();
+        });
+    }
+};
+
+
+// Increase or decrease a product quantity
 DummyHub.updateCartQuantity = function (productId, change) {
     var updatedCart = DummyHub.state.cart.map(function (item) {
         if (item.id === productId) {
             var newQuantity = item.quantity + change;
 
-            if (
-                newQuantity < item.minimumOrderQuantity ||
-                newQuantity > item.stock
-            ) {
+            // Prevent quantity from going below the minimum order quantity
+            if (newQuantity < item.minimumOrderQuantity) {
+                return item;
+            }
+
+            // Check whether the requested quantity exceeds available stock
+            if (newQuantity > item.stock) {
+                alert(
+                    "Only " + item.stock +
+                    " stocks available for " + item.title + "."
+                );
+
                 return item;
             }
 
@@ -141,28 +402,61 @@ DummyHub.updateCartQuantity = function (productId, change) {
     });
 
     DummyHub.setState({
-        cart: updatedCart
+        cart: updatedCart,
+        cartReceipt: null
     });
+
+    DummyHub.refreshCart();
 };
 
 
+// Remove a product from the cart
 DummyHub.removeFromCart = function (productId) {
     var updatedCart = DummyHub.state.cart.filter(function (item) {
         return item.id !== productId;
     });
 
     DummyHub.setState({
-        cart: updatedCart
+        cart: updatedCart,
+        cartReceipt: null
     });
+
+    DummyHub.refreshCart();
 };
 
+
+// Submit the cart as an order
 DummyHub.checkout = async function () {
     if (!DummyHub.state.user) {
-        alert("Please log in before checking out.");
+        DummyHub.state.redirectAfterLogin = "#/cart";
+        window.location.hash = "#/login";
         return;
     }
 
+    if (DummyHub.state.cart.length === 0) {
+        return;
+    }
+
+    // Save the purchased items before clearing the cart
+    var purchasedItems = DummyHub.state.cart.map(function (item) {
+        return {
+            id: item.id,
+            title: item.title,
+            price: item.price,
+            quantity: item.quantity,
+            discountPercentage: item.discountPercentage
+        };
+    });
+
+    var checkoutButton = document.getElementById("checkout-button");
+
+    if (checkoutButton) {
+        checkoutButton.disabled = true;
+        checkoutButton.textContent = "Processing...";
+    }
+
     try {
+        // Prepare the products for the server
         var products = DummyHub.state.cart.map(function (item) {
             return {
                 id: item.id,
@@ -170,6 +464,7 @@ DummyHub.checkout = async function () {
             };
         });
 
+        // Send the checkout request
         var result = await DummyHub.request("/carts/add", {
             method: "POST",
             body: JSON.stringify({
@@ -178,18 +473,41 @@ DummyHub.checkout = async function () {
             })
         });
 
+        // Save the receipt and clear the current cart
         DummyHub.setState({
+            cartReceipt: {
+                ...result,
+                items: purchasedItems
+            },
+
             pastCarts: [
-                ...DummyHub.state.pastCarts,
-                result
+                result,
+                ...DummyHub.state.pastCarts
             ],
+
             cart: []
         });
 
-        alert("Checkout successful! Order ID: " + result.id);
+        // Refresh the cart page and badge
+        DummyHub.refreshCart();
 
     } catch (error) {
-        alert("Checkout failed: " + error.message);
-        console.log(error);
+        var message = document.createElement("p");
+
+        message.className = "error-message";
+
+        message.textContent =
+            "Checkout failed: " + error.message;
+
+        var cartSummary = document.querySelector(".cart-summary");
+
+        if (cartSummary) {
+            cartSummary.appendChild(message);
+        }
+
+        if (checkoutButton) {
+            checkoutButton.disabled = false;
+            checkoutButton.textContent = "Checkout";
+        }
     }
 };

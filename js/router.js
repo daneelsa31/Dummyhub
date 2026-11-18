@@ -1,78 +1,104 @@
-// Get the current route from the URL
+
+// Get the current route from the URL hash
 DummyHub.getCurrentRoute = function () {
     var hash = window.location.hash;
 
-    // Use login as the default route
-    if (hash === "") {
-        hash = "#/login";
-    }
-
-    // Remove the # symbol
-    var path = hash.substring(1);
-
-    // Split the path into separate parts
-    var parts = path.split("/").filter(Boolean);
-
-    // Identify the route
-    if (parts[0] === "login") {
-        return { name: "login" };
-    }
-
-    if (parts[0] === "dashboard") {
+    // Dashboard is the default page
+    if (hash === "" || hash === "#/" || hash === "#") {
         return { name: "dashboard" };
     }
 
+    var path = hash.substring(1);
+    var parts = path.split("/").filter(Boolean);
+
+    // Login
+    if (parts[0] === "login" && parts.length === 1) {
+        return { name: "login" };
+    }
+
+    // Dashboard
+    if (parts[0] === "dashboard" && parts.length === 1) {
+        return { name: "dashboard" };
+    }
+
+    // Shop
     if (parts[0] === "shop" && parts.length === 1) {
         return { name: "shop" };
     }
 
-    if (parts[0] === "product" && parts[1]) {
+    // Product details
+    if (parts[0] === "shop" && parts[1] && parts.length === 2) {
         return {
             name: "product-detail",
             id: parts[1]
         };
     }
 
-    if (parts[0] === "cart") {
+    // Support the old product route too
+    if (parts[0] === "product" && parts[1] && parts.length === 2) {
+        return {
+            name: "product-detail",
+            id: parts[1]
+        };
+    }
+
+    // Cart
+    if (parts[0] === "cart" && parts.length === 1) {
         return { name: "cart" };
     }
 
+    // Recipes
     if (parts[0] === "recipes" && parts.length === 1) {
         return { name: "recipes" };
     }
 
-    if (parts[0] === "recipe" && parts[1]) {
+    // Recipe details
+    if (
+        (parts[0] === "recipes" || parts[0] === "recipe") &&
+        parts[1] &&
+        parts.length === 2
+    ) {
         return {
             name: "recipe-detail",
             id: parts[1]
         };
     }
 
+    // Community
     if (parts[0] === "community" && parts.length === 1) {
         return { name: "community" };
     }
 
-    if (parts[0] === "post" && parts[1]) {
+    // Post details
+    if (
+        (parts[0] === "community" || parts[0] === "post") &&
+        parts[1] &&
+        parts.length === 2
+    ) {
         return {
             name: "post-detail",
             id: parts[1]
         };
     }
 
+    // People
     if (parts[0] === "people" && parts.length === 1) {
         return { name: "people" };
     }
 
-    if (parts[0] === "people" && parts[1]) {
+    // User profile
+    if (parts[0] === "people" && parts[1] && parts.length === 2) {
         return {
             name: "user-profile",
             id: parts[1]
         };
     }
 
-    if (parts[0] === "tasks") {
+    // Tasks
+    if (parts[0] === "tasks" && parts.length === 1) {
         return { name: "tasks" };
     }
 
+    // Unknown route
     return { name: "not-found" };
 };

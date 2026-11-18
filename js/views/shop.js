@@ -1,11 +1,4 @@
 
-DummyHub.shopCurrentPage = 1;
-DummyHub.shopProducts = [];
-DummyHub.shopSearchTerm = "";
-DummyHub.shopCategory = "";
-DummyHub.shopSortValue = "";
-DummyHub.shopInStockOnly = false;
-
 // Display the Shop page
 DummyHub.renderShop = function () {
     return `
@@ -50,29 +43,57 @@ DummyHub.renderShop = function () {
 };
 
 
-// Load all products from DummyJSON
+// Load products from DummyJSON
 DummyHub.loadProducts = async function () {
     var productGrid = document.getElementById("product-grid");
+    var pagination = document.getElementById("product-pagination");
 
     productGrid.innerHTML = "<p>Loading products...</p>";
+    pagination.innerHTML = "";
 
     try {
-        var endpoint = "/products?limit=0";
+        var limit = 12;
+        var skip = (DummyHub.state.shopCurrentPage - 1) * limit;
+        var endpoint = "/products";
 
-        // Sorting is handled by the DummyJSON API
-        if (DummyHub.shopSortValue !== "") {
-            var sortBy = DummyHub.shopSortValue.replace("-", "");
-            var order = DummyHub.shopSortValue.startsWith("-")
-                ? "desc"
-                : "asc";
+        // Search products
+        if (DummyHub.state.shopSearchTerm !== "") {
+            endpoint = "/products/search?q=" +
+                encodeURIComponent(DummyHub.state.shopSearchTerm);
+        }
+
+        // Filter products by category
+        else if (DummyHub.state.shopCategory !== "") {
+            endpoint = "/products/category/" +
+                encodeURIComponent(DummyHub.state.shopCategory);
+        }
+
+        // Add pagination and select the required fields
+        var separator = endpoint.includes("?") ? "&" : "?";
+
+        endpoint += separator +
+            "limit=" + limit +
+            "&skip=" + skip +
+            "&select=title,price,discountPercentage,rating,stock,thumbnail,category";
+
+        // Add sorting
+        if (DummyHub.state.shopSortValue !== "") {
+            var sortBy = DummyHub.state.shopSortValue.replace("-", "");
+            var order = "asc";
+
+            if (DummyHub.state.shopSortValue.startsWith("-")) {
+                order = "desc";
+            }
 
             endpoint += "&sortBy=" + sortBy + "&order=" + order;
         }
 
         var data = await DummyHub.request(endpoint);
 
-        DummyHub.shopProducts = data.products;
-        DummyHub.shopCurrentPage = 1;
+        DummyHub.setState({
+            shopProducts: data.products,
+            shopTotal: data.total
+        });
 
         DummyHub.displayShopProducts();
 
@@ -90,52 +111,22 @@ DummyHub.loadProducts = async function () {
 };
 
 
-// Apply all filters and display the products
+// Display the products
 DummyHub.displayShopProducts = function () {
     var productGrid = document.getElementById("product-grid");
     var pagination = document.getElementById("product-pagination");
 
-    var products = [...DummyHub.shopProducts];
+    var products = DummyHub.state.shopProducts;
 
-    // Apply search
-    if (DummyHub.shopSearchTerm !== "") {
-        var searchTerm = DummyHub.shopSearchTerm.toLowerCase();
-
-        products = products.filter(function (product) {
-            return (
-                product.title.toLowerCase().includes(searchTerm) ||
-                product.description.toLowerCase().includes(searchTerm) ||
-                product.category.toLowerCase().includes(searchTerm)
-            );
-        });
-    }
-
-    // Apply category filter
-    if (DummyHub.shopCategory !== "") {
-        products = products.filter(function (product) {
-            return product.category === DummyHub.shopCategory;
-        });
-    }
-
-    // Apply in-stock filter
-    if (DummyHub.shopInStockOnly) {
+    // Apply the in-stock filter
+    if (DummyHub.state.shopInStockOnly) {
         products = DummyHub.filterInStockProducts(products);
     }
 
-    // Calculate pagination
     var limit = 12;
-    var totalPages = Math.ceil(products.length / limit);
+    var totalProducts = DummyHub.state.shopTotal || 0;
+    var totalPages = Math.ceil(totalProducts / limit);
 
-    if (totalPages === 0) {
-        DummyHub.shopCurrentPage = 1;
-    } else if (DummyHub.shopCurrentPage > totalPages) {
-        DummyHub.shopCurrentPage = totalPages;
-    }
-
-    var start = (DummyHub.shopCurrentPage - 1) * limit;
-    var displayedProducts = products.slice(start, start + limit);
-
-    // Display empty message
     if (products.length === 0) {
         productGrid.innerHTML = "<p>No products found.</p>";
         pagination.innerHTML = "";
@@ -143,9 +134,13 @@ DummyHub.displayShopProducts = function () {
     }
 
     // Display product cards
-    productGrid.innerHTML = displayedProducts.map(function (product) {
+    productGrid.innerHTML = products.map(function (product) {
         return `
-            <div class="product-card" data-stock="${product.stock}">
+            <div
+                class="product-card"
+                data-id="${product.id}"
+                data-stock="${product.stock}"
+            >
                 <img
                     src="${DummyHub.escapeHTML(product.thumbnail)}"
                     alt="${DummyHub.escapeHTML(product.title)}"
@@ -153,7 +148,7 @@ DummyHub.displayShopProducts = function () {
 
                 <h3>${DummyHub.escapeHTML(product.title)}</h3>
 
-                <p>$${product.price}</p>
+                <p>${DummyHub.formatPrice(product.price)}</p>
 
                 <p>Rating: ${product.rating}</p>
 
@@ -171,16 +166,16 @@ DummyHub.displayShopProducts = function () {
     pagination.innerHTML = `
         <button
             id="previous-page"
-            ${DummyHub.shopCurrentPage === 1 ? "disabled" : ""}
+            ${DummyHub.state.shopCurrentPage === 1 ? "disabled" : ""}
         >
             Previous
         </button>
 
-        <span>Page ${DummyHub.shopCurrentPage} of ${totalPages}</span>
+        <span>Page ${DummyHub.state.shopCurrentPage} of ${totalPages}</span>
 
         <button
             id="next-page"
-            ${DummyHub.shopCurrentPage === totalPages ? "disabled" : ""}
+            ${DummyHub.state.shopCurrentPage >= totalPages ? "disabled" : ""}
         >
             Next
         </button>
@@ -197,15 +192,21 @@ DummyHub.handlePagination = function () {
 
     if (previousButton) {
         previousButton.addEventListener("click", function () {
-            DummyHub.shopCurrentPage--;
-            DummyHub.displayShopProducts();
+            DummyHub.setState({
+                shopCurrentPage: DummyHub.state.shopCurrentPage - 1
+            });
+
+            DummyHub.loadProducts();
         });
     }
 
     if (nextButton) {
         nextButton.addEventListener("click", function () {
-            DummyHub.shopCurrentPage++;
-            DummyHub.displayShopProducts();
+            DummyHub.setState({
+                shopCurrentPage: DummyHub.state.shopCurrentPage + 1
+            });
+
+            DummyHub.loadProducts();
         });
     }
 };
@@ -228,17 +229,23 @@ DummyHub.loadCategories = async function () {
         });
 
     } catch (error) {
-        console.log("Unable to load categories:", error);
+        categoryFilter.innerHTML =
+            '<option value="">Categories unavailable</option>';
     }
 };
 
 
 // Apply category filter
 DummyHub.filterProductsByCategory = function (category) {
-    DummyHub.shopCategory = category;
-    DummyHub.shopCurrentPage = 1;
+    DummyHub.setState({
+        shopCategory: category,
+        shopSearchTerm: "",
+        shopCurrentPage: 1
+    });
 
-    DummyHub.displayShopProducts();
+    document.getElementById("product-search").value = "";
+
+    DummyHub.loadProducts();
 };
 
 
@@ -254,10 +261,15 @@ DummyHub.setupCategoryFilter = function () {
 
 // Apply search
 DummyHub.searchProducts = function (searchTerm) {
-    DummyHub.shopSearchTerm = searchTerm;
-    DummyHub.shopCurrentPage = 1;
+    DummyHub.setState({
+        shopSearchTerm: searchTerm,
+        shopCategory: "",
+        shopCurrentPage: 1
+    });
 
-    DummyHub.displayShopProducts();
+    document.getElementById("category-filter").value = "";
+
+    DummyHub.loadProducts();
 };
 
 
@@ -273,11 +285,14 @@ DummyHub.setupProductSearch = function () {
 };
 
 
-// Apply server-side sorting
-DummyHub.sortProducts = async function (sortValue) {
-    DummyHub.shopSortValue = sortValue;
+// Apply sorting
+DummyHub.sortProducts = function (sortValue) {
+    DummyHub.setState({
+        shopSortValue: sortValue,
+        shopCurrentPage: 1
+    });
 
-    await DummyHub.loadProducts();
+    DummyHub.loadProducts();
 };
 
 
@@ -304,27 +319,32 @@ DummyHub.setupInStockFilter = function () {
     var stockCheckbox = document.getElementById("in-stock-filter");
 
     stockCheckbox.addEventListener("change", function () {
-        DummyHub.shopInStockOnly = stockCheckbox.checked;
-        DummyHub.shopCurrentPage = 1;
+        DummyHub.setState({
+            shopInStockOnly: stockCheckbox.checked
+        });
 
         DummyHub.displayShopProducts();
     });
 };
 
 
-// Handle View Product buttons using event delegation
+// Handle product navigation using event delegation
 DummyHub.setupProductNavigation = function () {
     var productGrid = document.getElementById("product-grid");
 
     productGrid.addEventListener("click", function (event) {
         var button = event.target.closest('[data-action="view-product"]');
 
-        if (!button) {
-            return;
+        if (button) {
+            var productId = button.dataset.id;
+
+            window.location.hash = "#/shop/" + productId;
+        } else {
+            var card = event.target.closest(".product-card");
+
+            if (card) {
+                window.location.hash = "#/shop/" + card.dataset.id;
+            }
         }
-
-        var productId = button.dataset.id;
-
-        window.location.hash = "#/product/" + productId;
     });
 };

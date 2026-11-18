@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 
@@ -20,25 +21,35 @@
         <nav class="main-nav">
             <a href="#/dashboard">Dashboard</a>
             <a href="#/shop">Shop</a>
-            <a href="#/cart">Cart</a>
+            <a href="#/cart">
+                Cart
+                <span id="cart-badge" class="cart-badge hidden">0</span>
+            </a>
             <a href="#/recipes">Recipes</a>
             <a href="#/community">Community</a>
             <a href="#/people">People</a>
             <a href="#/tasks">Tasks</a>
         </nav>
 
-        <button id="logout-button" class="hidden">Logout</button>
-
         <div id="user-info">
             <a href="#/login" id="login-link" class="hidden">Login</a>
+
+            <div id="logged-in-user" class="logged-in-user hidden">
+                <img id="user-avatar" src="" alt="User profile">
+                <span id="user-name"></span>
+            </div>
         </div>
+
+        <button id="logout-button" class="hidden">Logout</button>
     </header>
 
     <!-- Main content area -->
-    <main id="app">
-        <h1>Welcome to DummyHub!</h1>
-        <p>Your application will appear here.</p>
-    </main>
+    <main id="app"></main>
+
+    <!-- Application footer -->
+    <footer class="app-footer">
+        <p>&copy; 2026 DummyHub. All rights reserved.</p>
+    </footer>
 
     <script src="js/state.js"></script>
     <script src="js/utils.js"></script>

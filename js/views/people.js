@@ -1,6 +1,4 @@
 
-DummyHub.allUsers = [];
-
 // Display the People page
 DummyHub.renderPeople = function () {
     return `
@@ -15,7 +13,10 @@ DummyHub.renderPeople = function () {
                 >
 
                 <select id="people-role">
-                    <option value="">All Job Titles</option>
+                    <option value="">All Roles</option>
+                    <option value="admin">Admin</option>
+                    <option value="moderator">Moderator</option>
+                    <option value="user">User</option>
                 </select>
 
                 <select id="people-sort">
@@ -23,6 +24,7 @@ DummyHub.renderPeople = function () {
                     <option value="firstName-asc">First Name (A-Z)</option>
                     <option value="firstName-desc">First Name (Z-A)</option>
                     <option value="lastName-asc">Last Name (A-Z)</option>
+                    <option value="lastName-desc">Last Name (Z-A)</option>
                     <option value="age-asc">Age (Youngest First)</option>
                     <option value="age-desc">Age (Oldest First)</option>
                 </select>
@@ -31,21 +33,82 @@ DummyHub.renderPeople = function () {
             <div id="people-list">
                 <p>Loading people...</p>
             </div>
+
+            <div id="people-pagination"></div>
         </section>
     `;
 };
+
 
 // Retrieve users from the API
 DummyHub.loadPeople = async function () {
     var peopleList = document.getElementById("people-list");
 
+    peopleList.innerHTML = "<p>Loading people...</p>";
+
+    var searchTerm = document.getElementById("people-search").value.trim();
+    var selectedRole = document.getElementById("people-role").value;
+    var sortValue = document.getElementById("people-sort").value;
+
+    var endpoint = "/users?limit=100";
+
+    if (searchTerm !== "") {
+        endpoint = "/users/search?q=" +
+            encodeURIComponent(searchTerm) +
+            "&limit=100";
+    } else if (selectedRole !== "") {
+        endpoint = "/users/filter?key=role&value=" +
+            encodeURIComponent(selectedRole) +
+            "&limit=100";
+    }
+
+    // Apply server-side sorting
+    if (sortValue !== "") {
+        var sortParts = sortValue.split("-");
+
+        endpoint += "&sortBy=" + sortParts[0] +
+            "&order=" + sortParts[1];
+    }
+
     try {
-        var data = await DummyHub.request("/users?limit=0");
+        var data = await DummyHub.request(endpoint);
+        var users = data.users || [];
+        var total = data.total || users.length;
 
-        DummyHub.allUsers = data.users;
+        // Retrieve additional users if the API has more than 100
+        var skip = users.length;
 
-        DummyHub.loadPeopleJobTitles();
-        DummyHub.displayPeople(DummyHub.allUsers);
+        while (skip < total) {
+            var nextEndpoint = endpoint;
+
+            if (nextEndpoint.includes("?")) {
+                nextEndpoint += "&skip=" + skip;
+            }
+
+            var nextData = await DummyHub.request(nextEndpoint);
+
+            if (!nextData.users || nextData.users.length === 0) {
+                break;
+            }
+
+            users = users.concat(nextData.users);
+            skip += nextData.users.length;
+        }
+
+        // Apply the role filter when search is also being used
+        if (searchTerm !== "" && selectedRole !== "") {
+            users = users.filter(function (user) {
+                return user.role === selectedRole;
+            });
+        }
+
+        DummyHub.setState({
+            users: users,
+            peopleTotal: users.length,
+            peopleCurrentPage: 1
+        });
+
+        DummyHub.displayPeople();
 
     } catch (error) {
         peopleList.innerHTML = `
@@ -60,40 +123,42 @@ DummyHub.loadPeople = async function () {
     }
 };
 
-// Load available job titles into the filter
-DummyHub.loadPeopleJobTitles = function () {
-    var roleFilter = document.getElementById("people-role");
-
-    var jobTitles = [
-        ...new Set(
-            DummyHub.allUsers.map(function (user) {
-                return user.company.title;
-            })
-        )
-    ];
-
-    jobTitles.sort();
-
-    jobTitles.forEach(function (title) {
-        var option = document.createElement("option");
-
-        option.value = title;
-        option.textContent = title;
-
-        roleFilter.appendChild(option);
-    });
-};
 
 // Display users
-DummyHub.displayPeople = function (users) {
+DummyHub.displayPeople = function () {
     var peopleList = document.getElementById("people-list");
+    var pagination = document.getElementById("people-pagination");
 
-    if (users.length === 0) {
-        peopleList.innerHTML = "<p>No people found.</p>";
+    if (!peopleList) {
         return;
     }
 
-    peopleList.innerHTML = users.map(function (user) {
+    var users = DummyHub.state.users || [];
+    var currentPage = DummyHub.state.peopleCurrentPage || 1;
+    var usersPerPage = 12;
+
+    var totalPages = Math.ceil(users.length / usersPerPage);
+
+    if (users.length === 0) {
+        peopleList.innerHTML = "<p>No people found.</p>";
+        pagination.innerHTML = "";
+        return;
+    }
+
+    var startIndex = (currentPage - 1) * usersPerPage;
+
+    var displayedUsers = users.slice(
+        startIndex,
+        startIndex + usersPerPage
+    );
+
+    peopleList.innerHTML = displayedUsers.map(function (user) {
+        var company = user.company || {};
+
+        var companyName = company.name || "No company";
+        var companyTitle = company.title || "No job title";
+        var department = company.department || "No department";
+
         return `
             <article class="person-card">
                 <img
@@ -107,11 +172,13 @@ DummyHub.displayPeople = function (users) {
                     ${DummyHub.escapeHTML(user.lastName)}
                 </h3>
 
-                <p>${DummyHub.escapeHTML(user.company.title)}</p>
+                <p>Role: ${DummyHub.escapeHTML(user.role || "user")}</p>
 
-                <p>${DummyHub.escapeHTML(user.company.department)}</p>
+                <p>Company: ${DummyHub.escapeHTML(companyName)}</p>
 
-                <p>${DummyHub.escapeHTML(user.email)}</p>
+                <p>Job Title: ${DummyHub.escapeHTML(companyTitle)}</p>
+
+                <p>Department: ${DummyHub.escapeHTML(department)}</p>
 
                 <button
                     data-action="view-person"
@@ -122,100 +189,110 @@ DummyHub.displayPeople = function (users) {
             </article>
         `;
     }).join("");
+
+    // Display pagination buttons
+    if (totalPages > 1) {
+        pagination.innerHTML = `
+            <button
+                id="people-previous"
+                ${currentPage === 1 ? "disabled" : ""}
+            >
+                Previous
+            </button>
+
+            <span>Page ${currentPage} of ${totalPages}</span>
+
+            <button
+                id="people-next"
+                ${currentPage === totalPages ? "disabled" : ""}
+            >
+                Next
+            </button>
+        `;
+
+        document.getElementById("people-previous").addEventListener(
+            "click",
+            function () {
+                DummyHub.changePeoplePage(-1);
+            }
+        );
+
+        document.getElementById("people-next").addEventListener(
+            "click",
+            function () {
+                DummyHub.changePeoplePage(1);
+            }
+        );
+    } else {
+        pagination.innerHTML = "";
+    }
 };
 
-// Search and filter users
-DummyHub.filterPeople = function () {
-    var searchTerm = document
-        .getElementById("people-search")
-        .value.toLowerCase();
 
-    var selectedTitle = document.getElementById("people-role").value;
+// Change the current People page
+DummyHub.changePeoplePage = function (change) {
+    var currentPage = DummyHub.state.peopleCurrentPage || 1;
 
-    var filteredUsers = DummyHub.allUsers.filter(function (user) {
-        var fullName = user.firstName + " " + user.lastName;
+    var totalPages = Math.ceil(
+        DummyHub.state.users.length / 12
+    );
 
-        var matchesSearch =
-            fullName.toLowerCase().includes(searchTerm) ||
-            user.email.toLowerCase().includes(searchTerm) ||
-            user.company.title.toLowerCase().includes(searchTerm);
+    var newPage = currentPage + change;
 
-        var matchesTitle =
-            selectedTitle === "" ||
-            user.company.title === selectedTitle;
-
-        return matchesSearch && matchesTitle;
-    });
-
-    DummyHub.displayPeople(filteredUsers);
-};
-
-// Sort users using the API
-DummyHub.sortPeople = async function () {
-    var sortValue = document.getElementById("people-sort").value;
-
-    if (sortValue === "") {
-        DummyHub.filterPeople();
+    if (newPage < 1 || newPage > totalPages) {
         return;
     }
 
-    var parts = sortValue.split("-");
-    var sortBy = parts[0];
-    var order = parts[1];
+    DummyHub.setState({
+        peopleCurrentPage: newPage
+    });
 
-    try {
-        var data = await DummyHub.request(
-            "/users?sortBy=" + sortBy +
-            "&order=" + order +
-            "&limit=0"
-        );
-
-        DummyHub.allUsers = data.users;
-
-        DummyHub.loadPeopleJobTitles();
-
-        // Restore the selected job title
-        var roleFilter = document.getElementById("people-role");
-
-        var selectedTitle = roleFilter.value;
-
-        roleFilter.innerHTML = '<option value="">All Job Titles</option>';
-
-        DummyHub.loadPeopleJobTitles();
-
-        roleFilter.value = selectedTitle;
-
-        DummyHub.filterPeople();
-
-    } catch (error) {
-        console.log("Unable to sort people:", error);
-    }
+    DummyHub.displayPeople();
 };
+
+
+// Search and filter users
+DummyHub.filterPeople = function () {
+    DummyHub.loadPeople();
+};
+
+
+// Sort users
+DummyHub.sortPeople = function () {
+    DummyHub.loadPeople();
+};
+
 
 // Set up search, filter, and sorting
 DummyHub.setupPeopleControls = function () {
-    document.getElementById("people-search").addEventListener(
-        "input",
-        DummyHub.filterPeople
-    );
+    var searchInput = document.getElementById("people-search");
+    var roleFilter = document.getElementById("people-role");
+    var sortFilter = document.getElementById("people-sort");
 
-    document.getElementById("people-role").addEventListener(
-        "change",
-        DummyHub.filterPeople
-    );
+    var searchHandler = DummyHub.debounce(function () {
+        DummyHub.filterPeople();
+    }, 300);
 
-    document.getElementById("people-sort").addEventListener(
-        "change",
-        DummyHub.sortPeople
-    );
+    searchInput.addEventListener("input", searchHandler);
+
+    roleFilter.addEventListener("change", function () {
+        DummyHub.filterPeople();
+    });
+
+    sortFilter.addEventListener("change", function () {
+        DummyHub.sortPeople();
+    });
 };
+
 
 // Handle profile navigation using event delegation
 DummyHub.setupPeopleNavigation = function () {
     var peopleList = document.getElementById("people-list");
 
     peopleList.addEventListener("click", function (event) {
-        var button = event.target.closest('[data-action="view-person"]');
+        var button = event.target.closest(
+            '[data-action="view-person"]'
+        );
 
         if (!button) {
             return;

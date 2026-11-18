@@ -16,6 +16,7 @@ DummyHub.renderLogin = function () {
                         placeholder="Enter your username"
                         required
                     >
+                    <p id="username-error" class="error-message"></p>
                 </div>
 
                 <div class="form-group">
@@ -27,6 +28,7 @@ DummyHub.renderLogin = function () {
                         placeholder="Enter your password"
                         required
                     >
+                    <p id="password-error" class="error-message"></p>
                 </div>
 
                 <p id="login-error" class="error-message"></p>
@@ -47,19 +49,26 @@ DummyHub.handleLogin = async function (event) {
     var username = document.getElementById("username").value.trim();
     var password = document.getElementById("password").value;
 
+    var usernameError = document.getElementById("username-error");
+    var passwordError = document.getElementById("password-error");
     var errorElement = document.getElementById("login-error");
     var loginButton = document.getElementById("login-button");
 
+    // Clear previous errors
+    usernameError.textContent = "";
+    passwordError.textContent = "";
+    errorElement.textContent = "";
+
     // Validate username
     if (!/^[a-zA-Z0-9_]{3,20}$/.test(username)) {
-        errorElement.textContent =
+        usernameError.textContent =
             "Username must be 3–20 characters and contain only letters, numbers, or underscores.";
         return;
     }
 
     // Validate password
     if (password.length < 6) {
-        errorElement.textContent =
+        passwordError.textContent =
             "Password must be at least 6 characters.";
         return;
     }
@@ -67,7 +76,6 @@ DummyHub.handleLogin = async function (event) {
     try {
         loginButton.disabled = true;
         loginButton.textContent = "Logging in...";
-        errorElement.textContent = "";
 
         // Send login credentials
         var loginData = await DummyHub.request("/auth/login", {
@@ -79,8 +87,11 @@ DummyHub.handleLogin = async function (event) {
             })
         });
 
-        // Store the access token temporarily
-        DummyHub.state.accessToken = loginData.accessToken;
+        // Temporarily store tokens for the next request
+        DummyHub.setState({
+            accessToken: loginData.accessToken,
+            refreshToken: loginData.refreshToken
+        });
 
         // Retrieve authenticated user information
         var userData = await DummyHub.request("/auth/me");
@@ -91,14 +102,27 @@ DummyHub.handleLogin = async function (event) {
         // Update application state
         DummyHub.setState({
             user: userData,
-            accessToken: loginData.accessToken,
             redirectAfterLogin: null
         });
 
-        // Return to the original page or go to Dashboard
-        window.location.hash = redirectRoute || "#/dashboard";
+        // Save tokens for future visits
+        localStorage.setItem("accessToken", loginData.accessToken);
+        localStorage.setItem("refreshToken", loginData.refreshToken);
+
+        // Return to the original page or Dashboard
+        window.location.hash = redirectRoute || "#/";
 
     } catch (error) {
+        // Clear tokens if authentication fails
+        DummyHub.setState({
+            user: null,
+            accessToken: null,
+            refreshToken: null
+        });
+
+        localStorage.removeItem("accessToken");
+        localStorage.removeItem("refreshToken");
+
         errorElement.textContent = error.message;
 
         // Clear password after unsuccessful login

@@ -1,8 +1,5 @@
 
-DummyHub.currentPost = null;
-DummyHub.currentPostComments = [];
-
-// Display the Post Details page
+ // Display the Post Details page
 DummyHub.renderPostDetail = function () {
     return `
         <section class="post-detail-page">
@@ -14,22 +11,52 @@ DummyHub.renderPostDetail = function () {
 };
 
 
-// Retrieve a post and its comments
+// Retrieve a post, its comments, and its author
 DummyHub.loadPostDetail = async function (postId) {
     var content = document.getElementById("post-detail-content");
 
     try {
+        // Check whether the post is already available in the Community feed
+        var existingPost = DummyHub.state.communityPosts.find(
+            function (post) {
+                return post.id === Number(postId);
+            }
+        );
+
+        var post;
+
+        if (existingPost) {
+            post = existingPost;
+        } else {
+            // Retrieve the post first if it is not in the current feed
+            post = await DummyHub.request("/posts/" + postId);
+        }
+
+        // Retrieve comments and author information in parallel
         var results = await Promise.all([
-            DummyHub.request("/posts/" + postId),
-            DummyHub.request("/posts/" + postId + "/comments")
+            DummyHub.request("/posts/" + postId + "/comments"),
+            DummyHub.request("/users/" + post.userId)
         ]);
 
-        DummyHub.currentPost = results[0];
-        DummyHub.currentPostComments = results[1].comments;
+        DummyHub.setState({
+            currentPost: post,
+            currentPostComments: results[0].comments || [],
+            currentPostAuthor: results[1]
+        });
 
         DummyHub.displayPostDetail();
 
     } catch (error) {
+        // Show the Not Found page if the post does not exist
+        if (
+            error.status === 404 ||
+            error.message.toLowerCase().includes("not found")
+        ) {
+            content.innerHTML = DummyHub.renderNotFound();
+            return;
+        }
+
+        // Show retry option for other errors
         content.innerHTML = `
             <p>Unable to load post details.</p>
             <button id="retry-post-detail">Retry</button>
@@ -47,16 +74,37 @@ DummyHub.loadPostDetail = async function (postId) {
 
 // Display the post and its comments
 DummyHub.displayPostDetail = function () {
-    var post = DummyHub.currentPost;
+    var post = DummyHub.state.currentPost;
     var content = document.getElementById("post-detail-content");
 
+    if (!post || !content) {
+        return;
+    }
+
+    var author = DummyHub.state.currentPostAuthor;
+    var comments = DummyHub.state.currentPostComments || [];
+
     var currentReaction = DummyHub.getCommunityReaction(post.id);
+
+    var authorName = author
+        ? author.firstName + " " + author.lastName
+        : "Unknown User";
+
+    // Create a profile link if the author information is available
+    var authorDisplay = author
+        ? `<a href="#/people/${Number(author.id)}">${DummyHub.escapeHTML(authorName)}</a>`
+        : "Unknown User";
 
     content.innerHTML = `
         <button id="back-to-community">Back to Community</button>
 
         <article class="post-detail">
             <h1>${DummyHub.escapeHTML(post.title)}</h1>
+
+            <p>
+                Posted by:
+                ${authorDisplay}
+            </p>
 
             <p>${DummyHub.escapeHTML(post.body)}</p>
 
@@ -91,7 +139,7 @@ DummyHub.displayPostDetail = function () {
         <hr>
 
         <section class="post-comments">
-            <h2>Comments (${DummyHub.currentPostComments.length})</h2>
+            <h2>Comments (${comments.length})</h2>
 
             <div id="comment-list">
                 ${DummyHub.renderPostComments()}
@@ -106,10 +154,11 @@ DummyHub.displayPostDetail = function () {
                             <textarea
                                 id="comment-input"
                                 placeholder="Write your comment..."
+                                maxlength="280"
                                 required
                             ></textarea>
 
-                            <p id="comment-error"></p>
+                            <p id="comment-error" class="error-message"></p>
 
                             <button type="submit" id="comment-submit">
                                 Submit Comment
@@ -124,6 +173,7 @@ DummyHub.displayPostDetail = function () {
         </section>
     `;
 
+    // Return to the Community page
     document.getElementById("back-to-community").addEventListener(
         "click",
         function () {
@@ -131,18 +181,8 @@ DummyHub.displayPostDetail = function () {
         }
     );
 
-    // Save the current post before going to Login
-    var loginToComment = document.getElementById("login-to-comment");
-
-    if (loginToComment) {
-        loginToComment.addEventListener("click", function () {
-            DummyHub.state.redirectAfterLogin =
-                window.location.hash;
-        });
-    }
-
     // Handle Like and Dislike buttons
-    content.addEventListener("click", function (event) {
+    content.onclick = function (event) {
         var button = event.target.closest("[data-action]");
 
         if (!button) {
@@ -154,11 +194,13 @@ DummyHub.displayPostDetail = function () {
 
         if (action === "like-post") {
             DummyHub.reactToPost(postId, "like");
+
         } else if (action === "dislike-post") {
             DummyHub.reactToPost(postId, "dislike");
         }
-    });
+    };
 
+    // Handle comment submission
     var commentForm = document.getElementById("comment-form");
 
     if (commentForm) {
@@ -172,19 +214,43 @@ DummyHub.displayPostDetail = function () {
 
 // Display the comments
 DummyHub.renderPostComments = function () {
-    if (DummyHub.currentPostComments.length === 0) {
+    var comments = DummyHub.state.currentPostComments || [];
+
+    if (comments.length === 0) {
         return "<p>No comments yet.</p>";
     }
 
-    return DummyHub.currentPostComments.map(function (comment) {
+    return comments.map(function (comment) {
+        var commenter = comment.user
+            ? comment.user.fullName
+            : "User";
+
         return `
             <article class="comment-card">
-                <h4>${DummyHub.escapeHTML(comment.user.fullName)}</h4>
+                <h4>${DummyHub.escapeHTML(commenter)}</h4>
+
                 <p>${DummyHub.escapeHTML(comment.body)}</p>
-                <p>Likes: ${comment.likes}</p>
+
+                <p>Likes: ${comment.likes || 0}</p>
             </article>
         `;
     }).join("");
+};
+
+
+// Validate a comment before submission
+DummyHub.validateComment = function (comment) {
+    var trimmedComment = comment.trim();
+
+    if (trimmedComment.length === 0) {
+        return "Comment cannot be empty or contain only spaces.";
+    }
+
+    if (trimmedComment.length > 280) {
+        return "Comment cannot exceed 280 characters.";
+    }
+
+    return "";
 };
 
 
@@ -202,34 +268,49 @@ DummyHub.handleCommentSubmit = async function (event) {
 
     var commentText = commentInput.value.trim();
 
-    if (commentText === "") {
-        errorElement.textContent = "Please enter a comment.";
+    // Check the comment before sending it
+    var validationMessage = DummyHub.validateComment(commentText);
+
+    if (validationMessage) {
+        errorElement.textContent = validationMessage;
         return;
     }
 
     try {
         submitButton.disabled = true;
         submitButton.textContent = "Submitting...";
+        errorElement.textContent = "";
 
+        // Send the new comment to DummyJSON
         var newComment = await DummyHub.request("/comments/add", {
             method: "POST",
             body: JSON.stringify({
                 body: commentText,
-                postId: DummyHub.currentPost.id,
+                postId: DummyHub.state.currentPost.id,
                 userId: DummyHub.state.user.id
             })
         });
 
-        DummyHub.currentPostComments = [
-            ...DummyHub.currentPostComments,
-            newComment
-        ];
+        // Attach the current user's name to the returned comment
+        newComment.user = {
+            fullName: DummyHub.state.user.firstName +
+                " " + DummyHub.state.user.lastName
+        };
 
+        // Append the returned comment to local state
+        DummyHub.setState({
+            currentPostComments: [
+                ...DummyHub.state.currentPostComments,
+                newComment
+            ]
+        });
+
+        // Refresh the post detail page
         DummyHub.displayPostDetail();
 
     } catch (error) {
         errorElement.textContent =
-            "Unable to submit comment: " + error.message;
+            "Unable to submit comment. Please try again.";
 
         submitButton.disabled = false;
         submitButton.textContent = "Submit Comment";

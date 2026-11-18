@@ -1,163 +1,362 @@
+
 // Get the main application container
 DummyHub.app = document.getElementById("app");
 
-// Update the navigation based on login status
+// Check whether the saved login information has been checked
+DummyHub.authInitialized = false;
+
+
+// Update the header based on login status
 DummyHub.updateAuthNavigation = function () {
     var loginLink = document.getElementById("login-link");
     var logoutButton = document.getElementById("logout-button");
+    var loggedInUser = document.getElementById("logged-in-user");
+    var userName = document.getElementById("user-name");
+    var userAvatar = document.getElementById("user-avatar");
 
     if (DummyHub.state.user) {
-        loginLink.classList.add("hidden");
-        logoutButton.classList.remove("hidden");
-    } else {
-        loginLink.classList.remove("hidden");
-        logoutButton.classList.add("hidden");
-    }
+        if (loginLink) {
+            loginLink.classList.add("hidden");
+        }
 
-    logoutButton.onclick = DummyHub.logout;
+        if (logoutButton) {
+            logoutButton.classList.remove("hidden");
+        }
+
+        if (loggedInUser) {
+            loggedInUser.classList.remove("hidden");
+        }
+
+        if (userName) {
+            userName.textContent =
+                DummyHub.state.user.firstName +
+                " " +
+                DummyHub.state.user.lastName;
+        }
+
+        if (userAvatar) {
+            userAvatar.src = DummyHub.state.user.image || "";
+            userAvatar.alt = "Profile picture of " +
+                (DummyHub.state.user.firstName || "user");
+        }
+
+    } else {
+        if (loginLink) {
+            loginLink.classList.remove("hidden");
+        }
+
+        if (logoutButton) {
+            logoutButton.classList.add("hidden");
+        }
+
+        if (loggedInUser) {
+            loggedInUser.classList.add("hidden");
+        }
+
+        if (userName) {
+            userName.textContent = "";
+        }
+
+        if (userAvatar) {
+            userAvatar.src = "";
+        }
+    }
 };
 
-// Display the current view
-DummyHub.renderApp = function () {
-    DummyHub.updateAuthNavigation();
+
+// Update the cart badge in the header
+DummyHub.updateCartBadge = function () {
+    var cartBadge = document.getElementById("cart-badge");
+
+    if (!cartBadge) {
+        return;
+    }
+
+    // Calculate the total quantity of all cart items
+    var cartCount = DummyHub.state.cart.reduce(function (total, item) {
+        return total + Number(item.quantity || 0);
+    }, 0);
+
+    // Always display the badge, even when the cart is empty
+    cartBadge.textContent = cartCount;
+    cartBadge.classList.remove("hidden");
+};
+
+
+// Highlight the navigation link for the current page
+DummyHub.updateActiveNavigation = function (routeName) {
+    var navLinks = document.querySelectorAll(".main-nav a");
+
+    // Group detail pages with their main navigation pages
+    var activeRoute = routeName;
+
+    if (routeName === "product-detail") {
+        activeRoute = "shop";
+    } else if (routeName === "recipe-detail") {
+        activeRoute = "recipes";
+    } else if (routeName === "post-detail") {
+        activeRoute = "community";
+    } else if (routeName === "user-profile") {
+        activeRoute = "people";
+    }
+
+    navLinks.forEach(function (link) {
+        var linkRoute = link.getAttribute("href").replace("#/", "");
+
+        if (linkRoute === activeRoute) {
+            link.classList.add("active");
+            link.setAttribute("aria-current", "page");
+        } else {
+            link.classList.remove("active");
+            link.removeAttribute("aria-current");
+        }
+    });
+};
+
+
+// Restore and verify a saved login session
+DummyHub.initializeAuth = async function () {
+    var savedAccessToken = localStorage.getItem("accessToken");
+    var savedRefreshToken = localStorage.getItem("refreshToken");
+
+    if (!savedAccessToken) {
+        DummyHub.authInitialized = true;
+        return;
+    }
+
+    // Temporarily restore the saved tokens
+    DummyHub.setState({
+        accessToken: savedAccessToken,
+        refreshToken: savedRefreshToken
+    });
+
+    try {
+        // Ask the server to verify the saved access token
+        var userData = await DummyHub.request("/auth/me");
+
+        DummyHub.setState({
+            user: userData
+        });
+
+    } catch (error) {
+        // Remove invalid or expired login information
+        localStorage.removeItem("accessToken");
+        localStorage.removeItem("refreshToken");
+
+        DummyHub.setState({
+            user: null,
+            accessToken: null,
+            refreshToken: null
+        });
+    }
+
+    DummyHub.authInitialized = true;
+};
+
+
+// Display the current page
+DummyHub.renderApp = async function () {
+    // Wait until saved login information has been checked
+    if (!DummyHub.authInitialized) {
+        return;
+    }
 
     var route = DummyHub.getCurrentRoute();
 
-    var logoutButton = document.getElementById("logout-button");
-
-    if (DummyHub.state.user) {
-        logoutButton.classList.remove("hidden");
-    } else {
-        logoutButton.classList.add("hidden");
+    // Prevent logged-in users from opening Login
+    if (route.name === "login" && DummyHub.state.user) {
+        window.location.hash = "#/";
+        return;
     }
 
-    logoutButton.onclick = DummyHub.logout;
+    // Pages that require login
+    var protectedRoutes = ["dashboard", "cart", "tasks"];
 
-    // Update the current route in our state
+    if (
+        protectedRoutes.includes(route.name) &&
+        !DummyHub.state.user
+    ) {
+        DummyHub.state.redirectAfterLogin =
+            window.location.hash || "#/";
+
+        window.location.hash = "#/login";
+        return;
+    }
+
+    // Update the current page and header
     DummyHub.state.currentRoute = route.name;
 
-    // Temporary page content for testing
-    // Display the appropriate view
+    DummyHub.updateAuthNavigation();
+    DummyHub.updateCartBadge();
+    DummyHub.updateActiveNavigation(route.name);
+
+    // Login page
     if (route.name === "login") {
         DummyHub.app.innerHTML = DummyHub.renderLogin();
 
         var loginForm = document.getElementById("login-form");
 
-        loginForm.addEventListener("submit", DummyHub.handleLogin);
-    } else if (route.name === "dashboard") {
-        if (!DummyHub.state.user) {
-            window.location.hash = "#/login";
-            return;
+        if (loginForm) {
+            loginForm.addEventListener(
+                "submit",
+                DummyHub.handleLogin
+            );
         }
+    }
 
+    // Dashboard page
+    else if (route.name === "dashboard") {
         DummyHub.app.innerHTML = DummyHub.renderDashboard();
-        DummyHub.loadDashboardData();
 
-        document.getElementById("new-quote-button").addEventListener(
-            "click",
-            DummyHub.loadNewQuote
-        );
-    } else if (route.name === "shop") {
+        await DummyHub.loadDashboardData();
+
+        var quoteButton = document.getElementById("new-quote-button");
+
+        if (quoteButton) {
+            quoteButton.addEventListener(
+                "click",
+                DummyHub.loadNewQuote
+            );
+        }
+    }
+
+    // Shop page
+    else if (route.name === "shop") {
         DummyHub.app.innerHTML = DummyHub.renderShop();
-        DummyHub.loadProducts();
-        DummyHub.loadCategories();
+
         DummyHub.setupCategoryFilter();
         DummyHub.setupProductSearch();
         DummyHub.setupProductSorting();
         DummyHub.setupInStockFilter();
         DummyHub.setupProductNavigation();
-    } else if (route.name === "product-detail") {
+
+        await DummyHub.loadProducts();
+        await DummyHub.loadCategories();
+    }
+
+    // Product Details page
+    else if (route.name === "product-detail") {
         DummyHub.app.innerHTML = DummyHub.renderProductDetail();
 
-        DummyHub.loadProductDetail(route.id).then(function () {
-            DummyHub.setupProductGallery();
-        });
-    } else if (route.name === "cart") {
-        if (!DummyHub.state.user) {
-            DummyHub.state.redirectAfterLogin = "#/cart";
-            window.location.hash = "#/login";
-            return;
-        }
+        await DummyHub.loadProductDetail(route.id);
+    }
 
+    // Cart page
+    else if (route.name === "cart") {
         DummyHub.app.innerHTML = DummyHub.renderCart();
 
-        if (DummyHub.state.cart.length > 0) {
-            DummyHub.setupCartEvents();
-        }
-    } else if (route.name === "recipes") {
+        await DummyHub.loadPastCarts();
+    }
+
+    // Recipes page
+    else if (route.name === "recipes") {
         DummyHub.app.innerHTML = DummyHub.renderRecipes();
 
         DummyHub.setupRecipeFilters();
         DummyHub.setupRecipeNavigation();
-        DummyHub.loadRecipes();
-    } else if (route.name === "recipe-detail") {
+
+        await DummyHub.loadRecipes();
+    }
+
+    // Recipe Details page
+    else if (route.name === "recipe-detail") {
         DummyHub.app.innerHTML = DummyHub.renderRecipeDetail();
-        DummyHub.loadRecipeDetail(route.id);
-    } else if (route.name === "community") {
-        DummyHub.communityLimit = 10;
+
+        await DummyHub.loadRecipeDetail(route.id);
+    }
+
+    // Community page
+    else if (route.name === "community") {
         DummyHub.app.innerHTML = DummyHub.renderCommunity();
 
         DummyHub.setupCommunityFilters();
         DummyHub.setupLoadMorePosts();
         DummyHub.setupCommunityEvents();
 
-        DummyHub.loadCommunityPosts();
-    } else if (route.name === "post-detail") {
+        await DummyHub.loadCommunityTags();
+        await DummyHub.loadCommunityPosts(true);
+    }
+
+    // Post Details page
+    else if (route.name === "post-detail") {
         DummyHub.app.innerHTML = DummyHub.renderPostDetail();
-        DummyHub.loadPostDetail(route.id);
-    } else if (route.name === "people") {
+
+        await DummyHub.loadPostDetail(route.id);
+    }
+
+    // People page
+    else if (route.name === "people") {
         DummyHub.app.innerHTML = DummyHub.renderPeople();
 
         DummyHub.setupPeopleControls();
         DummyHub.setupPeopleNavigation();
 
-        DummyHub.loadPeople();
+        await DummyHub.loadPeople();
+    }
 
-    } else if (route.name === "user-profile") {
+    // User Profile page
+    else if (route.name === "user-profile") {
         DummyHub.app.innerHTML = DummyHub.renderUserProfile();
 
-        DummyHub.loadUserProfile(route.id);
-    } else if (route.name === "tasks") {
-        if (!DummyHub.state.user) {
-            DummyHub.state.redirectAfterLogin = "#/tasks";
-            window.location.hash = "#/login";
-            return;
-        }
+        await DummyHub.loadUserProfile(route.id);
+    }
 
+    // Tasks page
+    else if (route.name === "tasks") {
         DummyHub.app.innerHTML = DummyHub.renderTasks();
 
         DummyHub.setupTaskControls();
         DummyHub.setupTaskEvents();
 
-        DummyHub.loadTasks();
-    } else if (route.name === "not-found") {
+        await DummyHub.loadTasks();
+    }
+
+    // Not Found page
+    else {
         DummyHub.app.innerHTML = DummyHub.renderNotFound();
-    } else {
-        DummyHub.app.innerHTML = `
-        <h1>${route.name}</h1>
-        <p>This page is still under development.</p>
-        ${route.id ? `<p>ID: ${route.id}</p>` : ""}
-    `;
     }
 };
 
+
+// Log out the current user
 DummyHub.logout = function () {
     DummyHub.setState({
         user: null,
         accessToken: null,
-        cart: []
+        refreshToken: null,
+        cart: [],
+        pastCarts: [],
+        cartReceipt: null,
+        tasks: [],
+        dashboardData: null
     });
+
+    // Clear saved login information
+    localStorage.removeItem("accessToken");
+    localStorage.removeItem("refreshToken");
 
     window.location.hash = "#/login";
 };
 
-// Listen for changes in the URL hash
+
+// Set up the Logout button
+var logoutButton = document.getElementById("logout-button");
+
+if (logoutButton) {
+    logoutButton.addEventListener(
+        "click",
+        DummyHub.logout
+    );
+}
+
+
+// Listen for page navigation
 window.addEventListener("hashchange", function () {
     DummyHub.renderApp();
 });
 
-// Display the initial page
-DummyHub.renderApp();
 
-
-
+// Start the application after checking the saved session
+DummyHub.initializeAuth().then(function () {
+    DummyHub.renderApp();
+});

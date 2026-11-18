@@ -1,7 +1,5 @@
 
-DummyHub.communityPosts = [];
 DummyHub.communityLimit = 10;
-DummyHub.communityReactions = {};
 
 
 // Display the Community page
@@ -33,19 +31,90 @@ DummyHub.renderCommunity = function () {
 
 
 // Retrieve community posts
-DummyHub.loadCommunityPosts = async function () {
+DummyHub.loadCommunityPosts = async function (reset) {
     var postsContainer = document.getElementById("community-posts");
+    var loadMoreButton = document.getElementById("load-more-posts");
+
+    if (!postsContainer) {
+        return;
+    }
+
+    if (reset) {
+        DummyHub.setState({
+            communityPosts: [],
+            communitySkip: 0,
+            communityTotal: 0
+        });
+
+        postsContainer.innerHTML = "<p>Loading community posts...</p>";
+    }
+
+    if (loadMoreButton) {
+        loadMoreButton.disabled = true;
+        loadMoreButton.textContent = "Loading...";
+    }
+
+    var searchInput = document.getElementById("community-search");
+    var tagInput = document.getElementById("community-tag");
+
+    var searchTerm = searchInput ? searchInput.value.trim() : "";
+    var selectedTag = tagInput ? tagInput.value : "";
+    var skip = DummyHub.state.communitySkip || 0;
+
+    var endpoint = "/posts?limit=" + DummyHub.communityLimit +
+        "&skip=" + skip;
+
+    // Search posts using the API
+    if (searchTerm !== "") {
+        endpoint = "/posts/search?q=" +
+            encodeURIComponent(searchTerm) +
+            "&limit=" + DummyHub.communityLimit +
+            "&skip=" + skip;
+    }
+
+    // Filter posts by tag using the API
+    else if (selectedTag !== "") {
+        endpoint = "/posts/tag/" +
+            encodeURIComponent(selectedTag) +
+            "?limit=" + DummyHub.communityLimit +
+            "&skip=" + skip;
+    }
 
     try {
-        var data = await DummyHub.request(
-            "/posts?limit=" + DummyHub.communityLimit
-        );
+        var data = await DummyHub.request(endpoint);
+        var newPosts = data.posts || [];
 
-        DummyHub.communityPosts = data.posts;
+        // Apply the tag filter too when searching
+        if (searchTerm !== "" && selectedTag !== "") {
+            newPosts = newPosts.filter(function (post) {
+                return post.tags.includes(selectedTag);
+            });
+        }
 
-        await DummyHub.loadCommunityTags();
+        // Append new posts using spread instead of replacing old posts
+        var updatedPosts = reset
+            ? [...newPosts]
+            : [...DummyHub.state.communityPosts, ...newPosts];
 
-        DummyHub.displayCommunityPosts(DummyHub.communityPosts);
+        DummyHub.setState({
+            communityPosts: updatedPosts,
+            communitySkip: skip + newPosts.length,
+            communityTotal: data.total || 0
+        });
+
+        DummyHub.displayCommunityPosts(updatedPosts);
+
+        // Show or hide Load More depending on remaining posts
+        if (loadMoreButton) {
+            loadMoreButton.disabled = false;
+            loadMoreButton.textContent = "Load More";
+
+            loadMoreButton.classList.toggle(
+                "hidden",
+                DummyHub.state.communitySkip >=
+                DummyHub.state.communityTotal
+            );
+        }
 
     } catch (error) {
         postsContainer.innerHTML = `
@@ -55,8 +124,15 @@ DummyHub.loadCommunityPosts = async function () {
 
         document.getElementById("retry-community").addEventListener(
             "click",
-            DummyHub.loadCommunityPosts
+            function () {
+                DummyHub.loadCommunityPosts(true);
+            }
         );
+
+        if (loadMoreButton) {
+            loadMoreButton.disabled = false;
+            loadMoreButton.textContent = "Load More";
+        }
     }
 };
 
@@ -64,6 +140,10 @@ DummyHub.loadCommunityPosts = async function () {
 // Display community posts
 DummyHub.displayCommunityPosts = function (posts) {
     var postsContainer = document.getElementById("community-posts");
+
+    if (!postsContainer) {
+        return;
+    }
 
     if (posts.length === 0) {
         postsContainer.innerHTML = "<p>No posts found.</p>";
@@ -85,9 +165,6 @@ DummyHub.displayCommunityPosts = function (posts) {
                         return DummyHub.escapeHTML(tag);
                     }).join(", ")}
                 </p>
-
-                <p>Likes: ${post.reactions.likes}</p>
-                <p>Dislikes: ${post.reactions.dislikes}</p>
 
                 <button
                     data-action="like-post"
@@ -118,23 +195,24 @@ DummyHub.displayCommunityPosts = function (posts) {
     }).join("");
 };
 
+
 // Load available post tags
 DummyHub.loadCommunityTags = async function () {
     var tagFilter = document.getElementById("community-tag");
 
+    if (!tagFilter) {
+        return;
+    }
+
     try {
-        var tags = await DummyHub.request("/posts/tags");
+        // Get available tags from the correct API endpoint
+        var tags = await DummyHub.request("/posts/tag-list");
 
         tagFilter.innerHTML = '<option value="">All Tags</option>';
 
         tags.forEach(function (tag) {
-            var tagSlug = typeof tag === "string"
-                ? tag
-                : tag.slug;
-
-            var tagName = typeof tag === "string"
-                ? tag
-                : tag.name;
+            var tagName = typeof tag === "string" ? tag : tag.name;
+            var tagSlug = typeof tag === "string" ? tag : tag.slug;
 
             var option = document.createElement("option");
 
@@ -145,60 +223,57 @@ DummyHub.loadCommunityTags = async function () {
         });
 
     } catch (error) {
-        console.log("Unable to load post tags:", error);
+        // Posts can still be displayed if tags cannot be loaded.
     }
 };
 
+
 // Search and filter community posts
 DummyHub.filterCommunityPosts = function () {
-    var searchTerm = document.getElementById("community-search").value.toLowerCase();
-    var selectedTag = document.getElementById("community-tag").value;
-
-    var filteredPosts = DummyHub.communityPosts.filter(function (post) {
-        var matchesSearch =
-            post.title.toLowerCase().includes(searchTerm) ||
-            post.body.toLowerCase().includes(searchTerm);
-
-        var matchesTag =
-            selectedTag === "" || post.tags.includes(selectedTag);
-
-        return matchesSearch && matchesTag;
-    });
-
-    DummyHub.displayCommunityPosts(filteredPosts);
+    DummyHub.loadCommunityPosts(true);
 };
 
 
 // Set up search and tag filtering
 DummyHub.setupCommunityFilters = function () {
-    document.getElementById("community-search").addEventListener(
-        "input",
-        DummyHub.filterCommunityPosts
-    );
+    var searchInput = document.getElementById("community-search");
+    var tagFilter = document.getElementById("community-tag");
 
-    document.getElementById("community-tag").addEventListener(
-        "change",
-        DummyHub.filterCommunityPosts
-    );
+    var searchHandler = DummyHub.debounce(function () {
+        DummyHub.filterCommunityPosts();
+    }, 300);
+
+    searchInput.addEventListener("input", searchHandler);
+
+    tagFilter.addEventListener("change", function () {
+        DummyHub.filterCommunityPosts();
+    });
 };
 
 
-// Load more posts
+// Load the next group of posts
 DummyHub.loadMoreCommunityPosts = async function () {
-    DummyHub.communityLimit += 10;
+    if (
+        DummyHub.state.communitySkip >=
+        DummyHub.state.communityTotal
+    ) {
+        return;
+    }
 
-    await DummyHub.loadCommunityPosts();
-
-    DummyHub.filterCommunityPosts();
+    await DummyHub.loadCommunityPosts(false);
 };
 
 
-// Set up Load More button
+// Set up the Load More button
 DummyHub.setupLoadMorePosts = function () {
-    document.getElementById("load-more-posts").addEventListener(
-        "click",
-        DummyHub.loadMoreCommunityPosts
-    );
+    var button = document.getElementById("load-more-posts");
+
+    if (button) {
+        button.addEventListener(
+            "click",
+            DummyHub.loadMoreCommunityPosts
+        );
+    }
 };
 
 
@@ -237,76 +312,115 @@ DummyHub.getCommunityReaction = function (postId) {
 
     var reactionKey = userId + "-" + postId;
 
-    return DummyHub.communityReactions[reactionKey] || null;
+    return DummyHub.state.communityReactions[reactionKey] || null;
 };
 
 
-// Like or dislike a post using toggle behavior
-// Like or dislike a post using toggle behavior
+// Like or dislike a post using local state only
 DummyHub.reactToPost = function (postId, reaction) {
     var userId = DummyHub.state.user
         ? DummyHub.state.user.id
         : "guest";
 
     var reactionKey = userId + "-" + postId;
+    var reactions = DummyHub.state.communityReactions;
 
-    var currentReaction = DummyHub.communityReactions[reactionKey];
+    var currentReaction = reactions[reactionKey];
 
+    // Clicking the same reaction removes it
     var newReaction = currentReaction === reaction
         ? null
         : reaction;
 
-    var updatedPosts = DummyHub.communityPosts.map(function (post) {
-        if (post.id === postId) {
-            var likes = post.reactions.likes;
-            var dislikes = post.reactions.dislikes;
+    var updatedPosts = DummyHub.state.communityPosts.map(function (post) {
+        if (post.id !== postId) {
+            return post;
+        }
 
-            // Remove the previous reaction
+        var likes = post.reactions.likes;
+        var dislikes = post.reactions.dislikes;
+
+        // Remove the previous reaction
+        if (currentReaction === "like") {
+            likes--;
+        } else if (currentReaction === "dislike") {
+            dislikes--;
+        }
+
+        // Apply the new reaction
+        if (newReaction === "like") {
+            likes++;
+        } else if (newReaction === "dislike") {
+            dislikes++;
+        }
+
+        return {
+            ...post,
+            reactions: {
+                ...post.reactions,
+                likes: likes,
+                dislikes: dislikes
+            }
+        };
+    });
+
+    // Copy the reaction object before changing it
+    var updatedReactions = {
+        ...reactions
+    };
+
+    if (newReaction === null) {
+        delete updatedReactions[reactionKey];
+    } else {
+        updatedReactions[reactionKey] = newReaction;
+    }
+
+    // Also update the post currently being viewed
+    var updatedCurrentPost = DummyHub.state.currentPost;
+
+    if (updatedCurrentPost && updatedCurrentPost.id === postId) {
+        var updatedPostInList = updatedPosts.find(function (post) {
+            return post.id === postId;
+        });
+
+        if (updatedPostInList) {
+            updatedCurrentPost = updatedPostInList;
+        } else {
+            var likes = updatedCurrentPost.reactions.likes;
+            var dislikes = updatedCurrentPost.reactions.dislikes;
+
             if (currentReaction === "like") {
                 likes--;
             } else if (currentReaction === "dislike") {
                 dislikes--;
             }
 
-            // Apply the new reaction
             if (newReaction === "like") {
                 likes++;
             } else if (newReaction === "dislike") {
                 dislikes++;
             }
 
-            return {
-                ...post,
+            updatedCurrentPost = {
+                ...updatedCurrentPost,
                 reactions: {
-                    ...post.reactions,
+                    ...updatedCurrentPost.reactions,
                     likes: likes,
                     dislikes: dislikes
                 }
             };
         }
-
-        return post;
-    });
-
-    DummyHub.communityReactions[reactionKey] = newReaction;
-    DummyHub.communityPosts = updatedPosts;
-
-    // Update the current post if the user is viewing its details
-    if (
-        DummyHub.currentPost &&
-        DummyHub.currentPost.id === postId
-    ) {
-        var updatedCurrentPost = updatedPosts.find(function (post) {
-            return post.id === postId;
-        });
-
-        DummyHub.currentPost = updatedCurrentPost;
     }
 
-    // Refresh whichever page is currently displayed
+    DummyHub.setState({
+        communityPosts: updatedPosts,
+        communityReactions: updatedReactions,
+        currentPost: updatedCurrentPost
+    });
+
     if (document.getElementById("post-detail-content")) {
         DummyHub.displayPostDetail();
     } else if (document.getElementById("community-posts")) {
-        DummyHub.filterCommunityPosts();
+        DummyHub.displayCommunityPosts(updatedPosts);
     }
 };

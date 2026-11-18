@@ -1,9 +1,10 @@
+
 DummyHub.renderDashboard = function () {
     return `
         <section class="dashboard">
             <h1>Welcome, ${DummyHub.escapeHTML(
-        DummyHub.state.user.firstName
-    )}!</h1>
+                DummyHub.state.user.firstName
+            )}!</h1>
 
             <section class="quote-card">
                 <h2>Quote of the Day</h2>
@@ -33,15 +34,29 @@ DummyHub.renderDashboard = function () {
     `;
 };
 
+
+// Retrieve dashboard information
 DummyHub.loadDashboardData = async function () {
     var userId = DummyHub.state.user.id;
 
+    var quoteElement = document.getElementById("dashboard-quote");
+    var cartsElement = document.getElementById("dashboard-carts");
+    var todosElement = document.getElementById("dashboard-todos");
+    var postsElement = document.getElementById("dashboard-posts");
+    var retryButton = document.getElementById("dashboard-retry");
+
+    retryButton.classList.add("hidden");
+
     try {
+        // Load all dashboard information at the same time
         var results = await Promise.all([
             DummyHub.request("/quotes/random"),
-            DummyHub.request("/carts/user/" + userId),
-            DummyHub.request("/todos/user/" + userId),
-            DummyHub.request("/posts/user/" + userId)
+
+            DummyHub.request("/auth/users/" + userId + "/carts"),
+
+            DummyHub.request("/auth/users/" + userId + "/todos"),
+
+            DummyHub.request("/auth/users/" + userId + "/posts")
         ]);
 
         var quoteData = results[0];
@@ -49,41 +64,105 @@ DummyHub.loadDashboardData = async function () {
         var todoData = results[2];
         var postData = results[3];
 
-        document.getElementById("dashboard-quote").textContent =
+        // Calculate cart count and combined discounted total using reduce
+        var cartSummary = cartData.carts.reduce(
+            function (summary, cart) {
+                summary.count++;
+
+                summary.discountedTotal += Number(
+                    cart.discountedTotal || 0
+                );
+
+                return summary;
+            },
+            {
+                count: 0,
+                discountedTotal: 0
+            }
+        );
+
+        // Calculate completed and pending todos using reduce
+        var todoSummary = todoData.todos.reduce(
+            function (summary, todo) {
+                if (todo.completed) {
+                    summary.completed++;
+                } else {
+                    summary.pending++;
+                }
+
+                return summary;
+            },
+            {
+                completed: 0,
+                pending: 0
+            }
+        );
+
+        // Count posts using reduce
+        var postCount = postData.posts.reduce(
+            function (count) {
+                return count + 1;
+            },
+            0
+        );
+
+        // Save dashboard information
+        DummyHub.setState({
+            dashboardData: {
+                quote: quoteData,
+                cartCount: cartSummary.count,
+                discountedTotal: cartSummary.discountedTotal,
+                completedTodos: todoSummary.completed,
+                pendingTodos: todoSummary.pending,
+                postCount: postCount
+            }
+        });
+
+        // Display quote
+        quoteElement.textContent =
             quoteData.quote + " — " + quoteData.author;
 
-        document.getElementById("dashboard-carts").textContent =
-            cartData.total;
+        // Display cart information
+        cartsElement.textContent =
+            cartSummary.count +
+            " carts · Discounted total: $" +
+            cartSummary.discountedTotal.toFixed(2);
 
-        document.getElementById("dashboard-todos").textContent =
-            todoData.total;
+        // Display todo information
+        todosElement.textContent =
+            todoSummary.completed +
+            " completed · " +
+            todoSummary.pending +
+            " pending";
 
-        document.getElementById("dashboard-posts").textContent =
-            postData.total;
-        // Try to load the dashboard data
+        // Display post information
+        postsElement.textContent = postCount;
+
     } catch (error) {
-        // Handle the error if something fails
-        console.error(error);
-
-        document.getElementById("dashboard-quote").textContent =
+        // Show an error if any dashboard request fails
+        quoteElement.textContent =
             "Unable to load dashboard data.";
 
-        document.getElementById("dashboard-retry").classList.remove("hidden");
+        cartsElement.textContent = "Unable to load carts.";
+        todosElement.textContent = "Unable to load todos.";
+        postsElement.textContent = "Unable to load posts.";
 
+        retryButton.classList.remove("hidden");
     }
 
-    var retryButton = document.getElementById("dashboard-retry");
-
-    retryButton.addEventListener("click", function () {
-        retryButton.classList.add("hidden");
-
-        document.getElementById("dashboard-quote").textContent =
-            "Loading quote...";
+    // Set the retry action
+    retryButton.onclick = function () {
+        quoteElement.textContent = "Loading quote...";
+        cartsElement.textContent = "Loading...";
+        todosElement.textContent = "Loading...";
+        postsElement.textContent = "Loading...";
 
         DummyHub.loadDashboardData();
-    });
+    };
 };
 
+
+// Load a new random quote
 DummyHub.loadNewQuote = async function () {
     var quoteElement = document.getElementById("dashboard-quote");
     var quoteButton = document.getElementById("new-quote-button");
@@ -94,6 +173,15 @@ DummyHub.loadNewQuote = async function () {
     try {
         var quoteData = await DummyHub.request("/quotes/random");
 
+        // Update only the quote in dashboard state
+        DummyHub.setState({
+            dashboardData: {
+                ...DummyHub.state.dashboardData,
+                quote: quoteData
+            }
+        });
+
+        // Update only the quote card
         quoteElement.textContent =
             quoteData.quote + " — " + quoteData.author;
 
